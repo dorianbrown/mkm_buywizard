@@ -1,0 +1,9 @@
+requests
+progressbar2
+requests_oauthlib
+tabulate
+dicttoxml
+micromenu~=2.0.3
+httpx
+authlib
+asyncio
