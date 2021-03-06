@@ -93,12 +93,13 @@ class PyMkmApi:
     def __init__(self, config=None, logger=None):
 
         if config is None:
-            print(">> Loading config file")
             try:
                 self.config = json.load(open("config.json"))
             except FileNotFoundError:
                 print("You must copy config.json to config.json and populate the fields.")
                 sys.exit(0)
+        elif isinstance(config, str):
+            self.config = json.load(open(config))
         else:
             self.config = config
 
@@ -268,12 +269,12 @@ class PyMkmApi:
         if r:
             return r.json()
 
-    async def fetch(self, sem, client, url, uri, item_type, item_id, progressbar=None):
+    async def fetch(self, sem, client, url, uri, item_type, item_id, progressbar=None, **kwargs):
         async with sem:
             client_auth = copy.copy(client.auth)
             client_auth.realm = url
             try:
-                resp = await client.get(url, auth=client_auth)
+                resp = await client.get(url, auth=client_auth, params=kwargs)
                 self.__read_request_limits_from_header(resp)
             except Exception as err:
                 self.logger.debug(f"Timeout on {item_type} {item_id}")
@@ -282,12 +283,13 @@ class PyMkmApi:
                     json = resp.json()
                     return json
                 except JSONDecodeError as err:
+                    self.logger.error(f"Reponse: {resp.status_code}")
                     self.logger.error(f"Error in async fetch: {err.msg}")
             finally:
                 if progressbar:
                     progressbar.update()
 
-    async def get_items(self, item_type, item_id_list, progressbar=None):
+    async def get_items(self, item_type, item_id_list, progressbar=None, **kwargs):
         async with AsyncOAuth1Client(
             client_id=self.config["app_token"],
             client_secret=self.config["app_secret"],
@@ -308,17 +310,52 @@ class PyMkmApi:
                             item_type,
                             item_id,
                             progressbar,
+                            **kwargs
                         )
                     )
                 )
             responses = await asyncio.gather(*tasks, return_exceptions=False)
             return responses
 
-    def get_items_async(self, item_type, item_id_list, progressbar=None):
+    def get_items_async(self, item_type, item_id_list, progressbar=None, **kwargs):
         loop = asyncio.get_event_loop()
         return loop.run_until_complete(
-            self.get_items(item_type, item_id_list, progressbar)
+            self.get_items(item_type, item_id_list, progressbar, **kwargs)
         )
+
+# TODO: Finish this
+    # def find_products_async(self, name_list, progressbar=None):
+    #     loop = asyncio.get_event_loop()
+    #     return loop.run_until_complete(
+    #         self.find_products_async_helper(name_list, progressbar)
+    #     )
+    #
+    # async def find_products_async_helper(self, name_list, progressbar=None):
+    #     async with AsyncOAuth1Client(
+    #         client_id=self.config["app_token"],
+    #         client_secret=self.config["app_secret"],
+    #         token=self.config["access_token"],
+    #         token_secret=self.config["access_token_secret"],
+    #         timeout=self.config["cardmarket_request_timeout"]
+    #     ) as client:
+    #         tasks = []
+    #         sem = asyncio.Semaphore(50)
+    #         for name in name_list:
+    #             tasks.append(
+    #                 asyncio.ensure_future(
+    #                     self.fetch(
+    #                         sem,
+    #                         client,
+    #                         f"{self.base_url}/{item_type}/{str(item_id)}",
+    #                         f"{self.base_url}/{item_type}/",
+    #                         item_type,
+    #                         item_id,
+    #                         progressbar,
+    #                     )
+    #                 )
+    #             )
+    #         responses = await asyncio.gather(*tasks, return_exceptions=False)
+    #         return responses
 
     def get_metaproduct(self, metaproduct_id, provided_oauth=None):
         ## https://api.cardmarket.com/ws/v2.0/metaproducts/:idMetaproduct
