@@ -78,31 +78,46 @@ class BuywizardApp:
         #     print(f"\t[{i}]: {list['name']} ({list['itemCount']} cards)")
         # choice = int(input("\nEnter your choice: "))
         # os.system("clear")
-
+        #
         # self.optimize_wantlist(choice)
 
-        self.optimize_wantlist(0)
+        self.optimize_wantlist(4)
 
     def get_account_data(self):
         return self.api.get_account()["account"]
 
-    def get_wantlist_articles(self, wantlist_id):
+    def async_get_retry(self, item_type, item_id_list, **kwargs):
+        print(f"Async fetching: {item_type}")
+
+        ret_list = [None]*len(item_id_list)
+        to_find = item_id_list.copy()
+
+        round = 1
+        while len([x for x in ret_list if x is not None]) < len(item_id_list):
+            print(f"Fetch round {round}: {len(to_find)} items left")
+            round += 1
+            results = self.api.get_items_async(
+                item_type=item_type,
+                item_id_list=to_find,
+                **kwargs
+            )
+
+            for ind in range(len(ret_list)):
+                if (ret_list[ind] is None) and (len(results) > 0):
+                    ret_list[ind] = results.pop(0)
+                    if ret_list[ind] is not None:
+                        to_find.pop(0)
+
+        return ret_list
+
+    def get_wantlist_data(self, wantlist_id):
         want_items = self.api.get_wantslist_items(self.wantlists[wantlist_id]['idWantsList']).get('item')
 
         products = [x for x in want_items if x['type'] == 'product']
         metaprod_wants = [x for x in want_items if x['type'] == 'metaproduct']
         print("fetching metaproducts")
 
-        with progressbar.ProgressBar(max_value=len(metaprod_wants)) as bar:
-            metaproducts = []
-            while len(metaproducts) < len(metaprod_wants):
-                found = self.api.get_items_async(
-                    item_type="metaproducts",
-                    item_id_list=[x['idMetaproduct'] for x in metaprod_wants],
-                    progressbar=bar
-                )
-                # Ordering of list gets lost here
-                metaproducts += [f for f in found if f is not None]
+        metaproducts = self.async_get_retry("metaproducts", [x['idMetaproduct'] for x in metaprod_wants])
 
         product_ids = [prod['idProduct'] for prod in products]
 
@@ -110,16 +125,21 @@ class BuywizardApp:
             for prod in metaprod['product']:
                 product_ids.append(prod['idProduct'])
 
-        with progressbar.ProgressBar(max_value=len(product_ids)) as bar:
-            products = self.api.get_items_async(
-                item_type="articles",
-                item_id_list=product_ids,
-                progressbar=bar
-            )
+        articles = self.async_get_retry("articles", product_ids, **self.config['search_filters'])
 
-        return None
+        # Filter down to countries
+        for i in range(len(articles)):
+            for j, item in reversed(list(enumerate(articles[i]['article']))):
+                if item['seller']['address']['country'] not in self.config['search_filters']['countries']:
+                    del articles[i]['article'][j]
+
+        # TODO: Put this into a nice datastructure?
+
+        return want_items, product_ids, articles
 
     def optimize_wantlist(self, wantlist_id):
 
-        self.get_wantlist_articles(wantlist_id)
+        # TODO Filter items out using wantlist preferences
+        want_items, product_ids, articles = self.get_wantlist_data(wantlist_id)
 
+        pass
