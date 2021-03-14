@@ -7,26 +7,14 @@ __author__ = "Andreas Ehrlund"
 __version__ = "2.5.0"
 __license__ = "MIT"
 
-import csv
 import json
 import logging
 import logging.handlers
-import pprint
-import uuid
 import sys
-import re
-import pkg_resources
-
-import progressbar
-import requests
-import tabulate as tb
-import os
 
 from pprint import pprint as pp
-from importlib import import_module
-from datetime import datetime
-from distutils.util import strtobool
-from pkg_resources import parse_version
+import numpy as np
+import pandas as pd
 
 from pymkmapi import PyMkmApi, CardmarketError
 
@@ -81,7 +69,7 @@ class BuywizardApp:
         #
         # self.optimize_wantlist(choice)
 
-        self.optimize_wantlist(4)
+        self.optimize_wantlist(0)
 
     def get_account_data(self):
         return self.api.get_account()["account"]
@@ -115,7 +103,6 @@ class BuywizardApp:
 
         products = [x for x in want_items if x['type'] == 'product']
         metaprod_wants = [x for x in want_items if x['type'] == 'metaproduct']
-        print("fetching metaproducts")
 
         metaproducts = self.async_get_retry("metaproducts", [x['idMetaproduct'] for x in metaprod_wants])
 
@@ -133,13 +120,37 @@ class BuywizardApp:
                 if item['seller']['address']['country'] not in self.config['search_filters']['countries']:
                     del articles[i]['article'][j]
 
-        # TODO: Put this into a nice datastructure?
+        # Output formatting
+        prod_to_metaprod = {}
+        for metaprod in metaproducts:
+            for prod in metaprod['product']:
+                prod_to_metaprod[prod['idProduct']] = prod['idMetaproduct']
 
-        return want_items, product_ids, articles
+        lod = []
+        for ind, prod_id in enumerate(product_ids):
+            seller_prices = {art['seller']['idUser']: art['price'] for art in articles[ind]['article']}
+            lod.append({
+                "prod_id": prod_id,
+                **seller_prices
+            })
+            if prod_id in prod_to_metaprod.keys():
+                lod[-1]['metaprod_id'] = prod_to_metaprod[prod_id]
+
+        # TODO: Create article_id dataframe (for translation back to article_id list)
+        price_df = pd.DataFrame(lod).set_index(['metaprod_id', 'prod_id']).fillna(np.inf)
+
+        zero_rows, *_ = np.where((price_df < np.inf).sum(axis=1) == 0)
+        if len(zero_rows) > 0:
+            print(f"There were {len(zero_rows)} cards with 0 sellers matching your search preferences."
+                  f"We are removing:")
+        price_df = price_df[~((price_df < np.inf).sum(axis=1) == 0)]
+
+        return price_df
 
     def optimize_wantlist(self, wantlist_id):
 
         # TODO Filter items out using wantlist preferences
-        want_items, product_ids, articles = self.get_wantlist_data(wantlist_id)
+        price_df = self.get_wantlist_data(wantlist_id)
+
 
         pass

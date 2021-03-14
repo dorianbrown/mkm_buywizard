@@ -284,7 +284,6 @@ class PyMkmApi:
                     return json
                 except JSONDecodeError as err:
                     self.logger.error(f"Reponse: {resp.status_code}")
-                    self.logger.error(f"Error in async fetch: {err.msg}")
             finally:
                 if progressbar:
                     progressbar.update()
